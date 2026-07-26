@@ -1329,7 +1329,7 @@ ccl_device_noinline int svm_node_principled_volume(KernelGlobals kg,
     /* Density and color attribute lookup if available. */
     const AttributeDescriptor attr_density = find_attribute(kg, sd, attr_node.x);
     if (attr_density.offset != ATTR_STD_NOT_FOUND) {
-      primitive_density = primitive_volume_attribute<float>(kg, sd, attr_density, true);
+      primitive_density = primitive_volume_attribute<float>(kg, sd, attr_density, false);
       density = fmaxf(density * primitive_density, 0.0f);
     }
   }
@@ -1340,7 +1340,7 @@ ccl_device_noinline int svm_node_principled_volume(KernelGlobals kg,
 
     const AttributeDescriptor attr_color = find_attribute(kg, sd, attr_node.y);
     if (attr_color.offset != ATTR_STD_NOT_FOUND) {
-      color *= rgb_to_spectrum(primitive_volume_attribute<float3>(kg, sd, attr_color, true));
+      color *= rgb_to_spectrum(primitive_volume_attribute<float3>(kg, sd, attr_color, false));
     }
 
     /* Add closure for volume scattering. */
@@ -1395,7 +1395,7 @@ ccl_device_noinline int svm_node_principled_volume(KernelGlobals kg,
     /* Add flame temperature from attribute if available. */
     const AttributeDescriptor attr_temperature = find_attribute(kg, sd, attr_node.z);
     if (attr_temperature.offset != ATTR_STD_NOT_FOUND) {
-      const float temperature = primitive_volume_attribute<float>(kg, sd, attr_temperature, true);
+      const float temperature = primitive_volume_attribute<float>(kg, sd, attr_temperature, false);
       T *= fmaxf(temperature, 0.0f);
     }
 

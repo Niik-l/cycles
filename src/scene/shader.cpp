@@ -558,6 +558,20 @@ void ShaderManager::device_update_pre(Device * /*device*/,
       shader->has_volume = output->input("Volume")->link != nullptr;
       shader->has_volume_spatial_varying = false;
       shader->has_volume_attribute_dependency = false;
+
+      /* Check volume nodes for spatial variation and attribute dependencies. */
+      if (shader->has_volume) {
+        for (ShaderNode *node : shader->graph->nodes) {
+          if (node->has_spatial_varying()) {
+            shader->has_volume_spatial_varying = true;
+          }
+          if (node->has_attribute_dependency()) {
+            shader->has_volume_attribute_dependency = true;
+            /* Attribute-dependent volumes are inherently spatially varying. */
+            shader->has_volume_spatial_varying = true;
+          }
+        }
+      }
       shader->has_displacement = output->input("Displacement")->link != nullptr;
       shader->has_bump_from_surface = false;
 

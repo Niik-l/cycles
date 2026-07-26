@@ -28,7 +28,7 @@
 #  define ccl_device_noinline_cpu ccl_device_noinline
 
 /* Forced inlining. */
-#  if defined(_WIN32) && !defined(FREE_WINDOWS)
+#  if defined(_WIN32) && !defined(FREE_WINDOWS) && !defined(__GNUC__)
 #    define ccl_device_inline static __forceinline
 #    define ccl_device_forceinline static __forceinline
 #    define ccl_device_inline_method __forceinline
