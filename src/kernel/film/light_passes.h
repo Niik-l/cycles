@@ -5,8 +5,12 @@
 #pragma once
 
 #include "kernel/film/write.h"
+#include "kernel/film/deep_write.h"
+#include "kernel/integrator/state_util.h"
 
 #include "kernel/integrator/shadow_catcher.h"
+
+#include "kernel/camera/camera.h"
 
 #include "kernel/sample/pattern.h"
 #include "util/atomic.h"
@@ -344,7 +348,9 @@ ccl_device_inline void film_write_combined_pass(KernelGlobals kg,
                                                 const uint32_t path_flag,
                                                 const int sample,
                                                 const Spectrum contribution,
-                                                ccl_global float *ccl_restrict buffer)
+                                                ccl_global float *ccl_restrict buffer,
+                                                const float depth,
+                                                const uint32_t pixel_index)
 {
 #ifdef __SHADOW_CATCHER__
   if (film_write_shadow_catcher(kg, path_flag, contribution, buffer)) {
@@ -358,6 +364,15 @@ ccl_device_inline void film_write_combined_pass(KernelGlobals kg,
 
   film_write_adaptive_buffer(kg, sample, contribution, buffer);
   film_write_volume_scattering_guiding_pass(kg, buffer, path_flag, contribution);
+
+#ifdef __DEEP_OUTPUT__
+  /* Deep samples for surfaces are written once in shade_surface.h at first hit.
+   * This function (film_write_combined_pass) is called multiple times per pixel
+   * for incremental light contributions, so we don't write here.
+   * Volumes write their own samples in shade_volume.h. */
+  (void)depth;
+  (void)pixel_index;
+#endif
 }
 
 /* Write combined pass with transparency. */
@@ -380,6 +395,9 @@ ccl_device_inline void film_write_combined_transparent_pass(KernelGlobals kg,
     film_write_pass_float4(buffer + kernel_data.film.pass_combined,
                            make_float4(contribution_rgb, transparent));
   }
+
+  /* Deep samples are written at primary surface hits; background/holdout passes have no
+   * reliable depth here, so skip deep output in this pass. */
 
   film_write_adaptive_buffer(kg, sample, contribution, buffer);
   film_write_volume_scattering_guiding_pass(kg, buffer, path_flag, contribution);
@@ -495,6 +513,18 @@ ccl_device_inline void film_write_direct_light(KernelGlobals kg,
   const uint32_t path_flag = INTEGRATOR_STATE(state, shadow_path, flag);
   const int sample = INTEGRATOR_STATE(state, shadow_path, sample);
 
+  uint32_t pixel_index = 0;
+  float depth = -1.0f;
+
+#ifdef __DEEP_OUTPUT__
+  pixel_index = INTEGRATOR_STATE(state, shadow_path, render_pixel_index);
+  if (kernel_data.film.use_deep_output && (INTEGRATOR_STATE(state, shadow_path, bounce) == 0)) {
+    Ray ray ccl_optional_struct_init;
+    integrator_state_read_shadow_ray(state, &ray);
+    depth = camera_z_depth(kg, ray.P);
+  }
+#endif
+
   /* Ambient occlusion. */
   if (path_flag & PATH_RAY_SHADOW_FOR_AO) {
     if ((kernel_data.kernel_features & KERNEL_FEATURE_AO_PASS) && (path_flag & PATH_RAY_CAMERA)) {
@@ -502,13 +532,14 @@ ccl_device_inline void film_write_direct_light(KernelGlobals kg,
     }
     if (kernel_data.kernel_features & KERNEL_FEATURE_AO_ADDITIVE) {
       const Spectrum ao_weight = INTEGRATOR_STATE(state, shadow_path, unshadowed_throughput);
-      film_write_combined_pass(kg, path_flag, sample, contribution * ao_weight, buffer);
+      film_write_combined_pass(
+          kg, path_flag, sample, contribution * ao_weight, buffer, depth, pixel_index);
     }
     return;
   }
 
   /* Direct light shadow. */
-  film_write_combined_pass(kg, path_flag, sample, contribution, buffer);
+  film_write_combined_pass(kg, path_flag, sample, contribution, buffer, depth, pixel_index);
 
 #ifdef __PASSES__
   if (kernel_data.film.light_pass_flag & PASS_ANY) {
@@ -652,6 +683,7 @@ ccl_device_inline void film_write_volume_emission(KernelGlobals kg,
                                                   ConstIntegratorState state,
                                                   const Spectrum L,
                                                   ccl_global float *ccl_restrict render_buffer,
+                                                  const float depth,
                                                   const int lightgroup = LIGHTGROUP_NONE)
 {
   Spectrum contribution = L;
@@ -660,8 +692,10 @@ ccl_device_inline void film_write_volume_emission(KernelGlobals kg,
   ccl_global float *buffer = film_pass_pixel_render_buffer(kg, state, render_buffer);
   const uint32_t path_flag = INTEGRATOR_STATE(state, path, flag);
   const int sample = INTEGRATOR_STATE(state, path, sample);
+  const uint32_t pixel_index = INTEGRATOR_STATE(state, path, render_pixel_index);
 
-  film_write_combined_pass(kg, path_flag, sample, contribution, buffer);
+  /* Write deep sample if depth is valid (>= 0). */
+  film_write_combined_pass(kg, path_flag, sample, contribution, buffer, depth, pixel_index);
   film_write_emission_or_background_pass(
       kg, state, contribution, buffer, kernel_data.film.pass_emission, lightgroup);
 }
@@ -679,8 +713,22 @@ ccl_device_inline void film_write_surface_emission(KernelGlobals kg,
   ccl_global float *buffer = film_pass_pixel_render_buffer(kg, state, render_buffer);
   const uint32_t path_flag = INTEGRATOR_STATE(state, path, flag);
   const int sample = INTEGRATOR_STATE(state, path, sample);
+  const uint32_t pixel_index = INTEGRATOR_STATE(state, path, render_pixel_index);
 
-  film_write_combined_pass(kg, path_flag, sample, contribution, buffer);
+  float depth = -1.0f;
+#ifdef __DEEP_OUTPUT__
+  if (kernel_data.film.use_deep_output && (INTEGRATOR_STATE(state, path, bounce) == 0)) {
+    Intersection isect ccl_optional_struct_init;
+    integrator_state_read_isect(state, &isect);
+    /* Reconstruct camera depth from the primary ray and intersection. */
+    Ray ray ccl_optional_struct_init;
+    integrator_state_read_ray(state, &ray);
+    float3 P = ray.P + ray.D * isect.t;
+    depth = camera_z_depth(kg, P);
+  }
+#endif
+
+  film_write_combined_pass(kg, path_flag, sample, contribution, buffer, depth, pixel_index);
   film_write_emission_or_background_pass(
       kg, state, contribution, buffer, kernel_data.film.pass_emission, lightgroup);
 }

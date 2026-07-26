@@ -158,6 +158,12 @@ class Device {
   }
   virtual void set_error(const string &error);
   virtual BVHLayoutMask get_bvh_layout_mask(const uint kernel_features) const = 0;
+  /* Query device memory info if available. Returns total/free as zero if unsupported. */
+  virtual void get_device_memory_info(size_t &total, size_t &free)
+  {
+    total = 0;
+    free = 0;
+  }
 
   /* statistics */
   Stats &stats;

@@ -88,7 +88,7 @@ void PathTrace::load_kernels()
 
 void PathTrace::alloc_work_memory()
 {
-  for (auto &&path_trace_work : path_trace_works_) {
+  for (auto &path_trace_work : path_trace_works_) {
     path_trace_work->alloc_work_memory();
   }
 }
@@ -188,13 +188,17 @@ void PathTrace::render_pipeline(RenderWork render_work)
   render_scheduler_.set_need_schedule_cryptomatte(device_scene_->data.film.cryptomatte_passes !=
                                                   0);
 
-  render_init_kernel_execution();
-
   render_scheduler_.report_work_begin(render_work);
 
   init_render_buffers(render_work);
 
   rebalance(render_work);
+  sync_deep_output_buffers();
+
+  /* Initialize kernel execution AFTER deep buffer sync so that CPU thread-local kernel globals
+   * have the updated deep buffer pointers. This is critical for mixed CPU/GPU rendering where
+   * rebalance can change slice layouts and deep buffer allocations. */
+  render_init_kernel_execution();
 
   /* Reset sample limit. */
   render_scheduler_.set_limit_samples_per_update(0);
@@ -689,6 +693,11 @@ void PathTrace::set_display_driver(unique_ptr<DisplayDriver> driver)
   }
 }
 
+void PathTrace::set_deep_output_driver(unique_ptr<DeepOutputDriver> driver)
+{
+  deep_output_driver_ = std::move(driver);
+}
+
 void PathTrace::zero_display()
 {
   if (display_) {
@@ -825,6 +834,34 @@ void PathTrace::rebalance(const RenderWork &render_work)
   copy_from_render_buffers(&big_tile_cpu_buffers);
 
   render_scheduler_.report_rebalance_time(render_work, time_dt() - start_time, true);
+}
+
+void PathTrace::sync_deep_output_buffers()
+{
+  if (!deep_output_driver_ || !deep_output_driver_->is_enabled()) {
+    return;
+  }
+
+  vector<DeepOutputDriver::SliceParams> slices;
+  slices.reserve(path_trace_works_.size());
+
+  for (auto &&path_trace_work : path_trace_works_) {
+    const BufferParams &params = path_trace_work->get_effective_buffer_params();
+    DeepOutputDriver::SliceParams slice;
+    slice.device = path_trace_work->get_device();
+    slice.full_x = params.full_x;
+    slice.full_y = params.full_y;
+    slice.width = params.width;
+    slice.height = params.height;
+    slice.window_x = params.window_x;
+    slice.window_y = params.window_y;
+    slice.window_width = params.window_width;
+    slice.window_height = params.window_height;
+    slices.push_back(slice);
+  }
+
+  deep_output_driver_->sync_device_buffers(slices);
+  deep_output_driver_->update_device_kernel_data(device_scene_->data);
 }
 
 void PathTrace::write_tile_buffer(const RenderWork &render_work)

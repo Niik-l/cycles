@@ -288,6 +288,7 @@ set(SRC_KERNEL_FILM_HEADERS
   film/volume_guiding_denoise.h
   film/cryptomatte_passes.h
   film/light_passes.h
+  film/deep_write.h
   film/read.h
   film/write.h
 )

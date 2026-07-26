@@ -11,6 +11,8 @@ set(INC_SYS
 
 set(SRC
   buffers.cpp
+  deep_buffers.cpp
+  deep_output_driver.cpp
   display_driver.cpp
   denoising.cpp
   merge.cpp
@@ -20,6 +22,8 @@ set(SRC
 
 set(SRC_HEADERS
   buffers.h
+  deep_buffers.h
+  deep_output_driver.h
   display_driver.h
   denoising.h
   merge.h

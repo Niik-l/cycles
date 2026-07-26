@@ -13,6 +13,7 @@
 #include "integrator/work_balancer.h"
 
 #include "session/buffers.h"
+#include "session/deep_output_driver.h"
 
 #include "util/guiding.h"  // IWYU pragma: keep
 #include "util/thread.h"
@@ -105,6 +106,15 @@ class PathTrace {
 
   /* Set display driver for interactive render buffer display. */
   void set_display_driver(unique_ptr<DisplayDriver> driver);
+
+  /* Set deep output driver for deep EXR output. */
+  void set_deep_output_driver(unique_ptr<DeepOutputDriver> driver);
+
+  /* Get deep output driver (for finalization after render). */
+  DeepOutputDriver *get_deep_output_driver() const
+  {
+    return deep_output_driver_.get();
+  }
 
   /* Clear the display buffer by filling it in with all zeroes. */
   void zero_display();
@@ -216,6 +226,7 @@ class PathTrace {
   void rebalance(const RenderWork &render_work);
   void write_tile_buffer(const RenderWork &render_work);
   void finalize_full_buffer_on_disk(const RenderWork &render_work);
+  void sync_deep_output_buffers();
 
   /* Updates/initializes the guiding structures after a rendering iteration.
    * The structures are updated using the training data/samples generated during the previous
@@ -272,6 +283,9 @@ class PathTrace {
 
   /* Output driver to write render buffer to. */
   unique_ptr<OutputDriver> output_driver_;
+
+  /* Deep output driver for deep EXR output. */
+  unique_ptr<DeepOutputDriver> deep_output_driver_;
 
   /* Per-compute device descriptors of work which is responsible for path tracing on its configured
    * device. */

@@ -21,6 +21,7 @@
 CCL_NAMESPACE_BEGIN
 
 class BufferParams;
+class DeepOutputDriver;
 class Device;
 class DeviceScene;
 class DisplayDriver;
@@ -145,6 +146,10 @@ class Session {
 
   void set_output_driver(unique_ptr<OutputDriver> driver);
   void set_display_driver(unique_ptr<DisplayDriver> driver);
+  void set_deep_output_driver(unique_ptr<DeepOutputDriver> driver);
+
+  /* Get deep output driver (for finalization). */
+  DeepOutputDriver *get_deep_output_driver();
 
   double get_estimated_remaining_time() const;
 

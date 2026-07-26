@@ -148,6 +148,15 @@ KERNEL_STRUCT_MEMBER(film, int, use_approximate_shadow_catcher)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_color)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_probability)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_avg_roughness)
+/* Deep Output */
+KERNEL_STRUCT_MEMBER(film, int, use_deep_output)
+KERNEL_STRUCT_MEMBER(film, int, deep_max_samples)
+KERNEL_STRUCT_MEMBER(film, int, deep_width)
+KERNEL_STRUCT_MEMBER(film, int, deep_height)
+KERNEL_STRUCT_MEMBER_DONT_SPECIALIZE
+KERNEL_STRUCT_MEMBER(film, uint64_t, deep_samples_ptr)
+KERNEL_STRUCT_MEMBER_DONT_SPECIALIZE
+KERNEL_STRUCT_MEMBER(film, uint64_t, deep_sample_counts_ptr)
 KERNEL_STRUCT_END(KernelFilm)
 
 /* Integrator. */

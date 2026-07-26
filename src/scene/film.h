@@ -52,11 +52,37 @@ class Film : public Node {
 
   NODE_SOCKET_API(bool, use_sample_count)
 
+  /* Deep EXR output settings. */
+  NODE_SOCKET_API(bool, use_deep_output)
+  NODE_SOCKET_API(int, deep_max_samples)
+
+  void set_deep_samples_ptr(uint64_t ptr)
+  {
+    deep_samples_ptr_ = ptr;
+    tag_modified();
+  }
+  void set_deep_sample_counts_ptr(uint64_t ptr)
+  {
+    deep_sample_counts_ptr_ = ptr;
+    tag_modified();
+  }
+  void set_deep_dimensions(int w, int h)
+  {
+    deep_width_ = w;
+    deep_height_ = h;
+    tag_modified();
+  }
+
  private:
   size_t filter_table_offset_;
   bool prev_have_uv_pass = false;
   bool prev_have_motion_pass = false;
   bool prev_have_ao_pass = false;
+
+  uint64_t deep_samples_ptr_ = 0;
+  uint64_t deep_sample_counts_ptr_ = 0;
+  int deep_width_ = 0;
+  int deep_height_ = 0;
 
  public:
   Film();

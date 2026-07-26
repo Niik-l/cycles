@@ -146,6 +146,11 @@ class PathTraceWork {
     return device_;
   }
 
+  const BufferParams &get_effective_buffer_params() const
+  {
+    return effective_buffer_params_;
+  }
+
 #if defined(WITH_PATH_GUIDING)
   /* Initializes the per-thread guiding kernel data. */
   virtual void guiding_init_kernel_globals(void * /*unused*/,

@@ -16,6 +16,7 @@
 #include "scene/scene.h"
 #include "scene/shader_graph.h"
 #include "session/buffers.h"
+#include "session/deep_output_driver.h"
 #include "session/display_driver.h"
 #include "session/output_driver.h"
 #include "session/session.h"
@@ -635,6 +636,16 @@ void Session::set_output_driver(unique_ptr<OutputDriver> driver)
 void Session::set_display_driver(unique_ptr<DisplayDriver> driver)
 {
   path_trace_->set_display_driver(std::move(driver));
+}
+
+void Session::set_deep_output_driver(unique_ptr<DeepOutputDriver> driver)
+{
+  path_trace_->set_deep_output_driver(std::move(driver));
+}
+
+DeepOutputDriver *Session::get_deep_output_driver()
+{
+  return path_trace_->get_deep_output_driver();
 }
 
 double Session::get_estimated_remaining_time() const

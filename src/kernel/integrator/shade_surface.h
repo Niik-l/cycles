@@ -10,6 +10,9 @@
 #include "kernel/film/data_passes.h"
 #include "kernel/film/denoising_passes.h"
 #include "kernel/film/light_passes.h"
+#include "kernel/film/deep_write.h"
+
+#include "kernel/camera/camera.h"
 
 #include "kernel/light/sample.h"
 
@@ -752,6 +755,28 @@ ccl_device int integrate_surface(KernelGlobals kg,
     {
       /* Filter closures. */
       surface_shader_prepare_closures(kg, state, &sd, path_flag);
+
+#ifdef __DEEP_OUTPUT__
+      /* Write deep sample at primary camera ray intersection (bounce 0).
+       * Use shader alpha for transparent surfaces; RGB is applied via Deep Recolor. */
+      if (kernel_data.film.use_deep_output && (INTEGRATOR_STATE(state, path, bounce) == 0)) {
+        const float depth = camera_z_depth(kg, sd.P);
+        if (depth > 0.0f) {
+          const float alpha = average(surface_shader_alpha(&sd));
+          if (alpha > 0.0f) {
+            const uint32_t pixel_index = INTEGRATOR_STATE(state, path, render_pixel_index);
+            ccl_global KernelDeepSample *deep_samples = (ccl_global KernelDeepSample *)
+                                                            kernel_data.film.deep_samples_ptr;
+            ccl_global uint32_t *deep_sample_counts = (ccl_global uint32_t *)
+                                                          kernel_data.film.deep_sample_counts_ptr;
+            if (deep_samples && deep_sample_counts) {
+              film_write_deep_sample_transparent(
+                  kg, pixel_index, deep_samples, deep_sample_counts, alpha, depth, depth);
+            }
+          }
+        }
+      }
+#endif
 
       /* Evaluate holdout. */
       if (!integrate_surface_holdout(kg, state, &sd, render_buffer)) {
