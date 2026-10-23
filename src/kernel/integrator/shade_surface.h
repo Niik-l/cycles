@@ -731,6 +731,26 @@ ccl_device int integrate_surface(KernelGlobals kg,
 
   const uint32_t path_flag = INTEGRATOR_STATE(state, path, flag);
 
+#ifdef __DEEP_OUTPUT__
+  /* Deep hidden layers: the camera ray passes through its first deep_peel objects (all of an
+   * object's faces count as one, so a closed mesh is crossed whole), so this render records what
+   * is behind them. They still cast shadows and show in reflections. */
+  if (kernel_data.film.deep_peel > 0 && INTEGRATOR_STATE(state, path, bounce) == 0 &&
+      !(sd.flag & SD_HAS_ONLY_VOLUME))
+  {
+    const int last = INTEGRATOR_STATE(state, path, deep_peel_object);
+    const int peeled = INTEGRATOR_STATE(state, path, deep_peeled);
+    if (sd.object != OBJECT_NONE && (sd.object == last || peeled < kernel_data.film.deep_peel)) {
+      if (sd.object != last) {
+        INTEGRATOR_STATE_WRITE(state, path, deep_peeled) = peeled + 1;
+        INTEGRATOR_STATE_WRITE(state, path, deep_peel_object) = sd.object;
+      }
+      INTEGRATOR_STATE_WRITE(state, ray, tmin) = intersection_t_offset(sd.ray_length);
+      return LABEL_TRANSMIT | LABEL_TRANSPARENT;
+    }
+  }
+#endif
+
   /* Skip most work for volume bounding surface. */
 #ifdef __VOLUME__
   if (!(sd.flag & SD_HAS_ONLY_VOLUME)) {

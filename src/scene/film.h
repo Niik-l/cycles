@@ -55,6 +55,8 @@ class Film : public Node {
   /* Deep EXR output settings. */
   NODE_SOCKET_API(bool, use_deep_output)
   NODE_SOCKET_API(int, deep_max_samples)
+  /* Deep hidden layers: camera rays pass through their first deep_peel objects (0 = off). */
+  NODE_SOCKET_API(int, deep_peel)
 
   void set_deep_samples_ptr(uint64_t ptr)
   {

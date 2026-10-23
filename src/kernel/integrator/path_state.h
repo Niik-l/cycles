@@ -46,6 +46,8 @@ ccl_device_inline void path_state_init_integrator(KernelGlobals kg,
   INTEGRATOR_STATE_WRITE(state, path, sample) = sample;
   INTEGRATOR_STATE_WRITE(state, path, bounce) = 0;
   INTEGRATOR_STATE_WRITE(state, path, deep_slot) = 0xFFFFFFFFu;
+  INTEGRATOR_STATE_WRITE(state, path, deep_peeled) = 0;
+  INTEGRATOR_STATE_WRITE(state, path, deep_peel_object) = OBJECT_NONE;
   INTEGRATOR_STATE_WRITE(state, path, diffuse_bounce) = 0;
   INTEGRATOR_STATE_WRITE(state, path, glossy_bounce) = 0;
   INTEGRATOR_STATE_WRITE(state, path, transmission_bounce) = 0;

@@ -69,6 +69,9 @@ KERNEL_STRUCT_MEMBER(path, PackedSpectrum, denoising_feature_throughput, KERNEL_
 KERNEL_STRUCT_MEMBER(path, uint32_t, shader_sort_key, KERNEL_FEATURE_PATH_TRACING)
 /* Deep output: the deep sample this path's light goes to (kernel/film/deep_write.h). */
 KERNEL_STRUCT_MEMBER(path, uint32_t, deep_slot, KERNEL_FEATURE_PATH_TRACING)
+/* Deep hidden layers: objects the camera ray has passed through, and the last one. */
+KERNEL_STRUCT_MEMBER(path, uint16_t, deep_peeled, KERNEL_FEATURE_PATH_TRACING)
+KERNEL_STRUCT_MEMBER(path, int, deep_peel_object, KERNEL_FEATURE_PATH_TRACING)
 KERNEL_STRUCT_END(path)
 
 /************************************** Ray ***********************************/

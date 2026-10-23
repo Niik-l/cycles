@@ -693,7 +693,9 @@ ccl_device_inline void film_write_background(KernelGlobals kg,
 #ifdef __DEEP_OUTPUT__
     /* A camera ray reaching an opaque background (film not transparent): the background is a deep
      * sample too, far away, so deep compositing and defocus see it and every camera path counts. */
-    if (kernel_data.film.use_deep_output && INTEGRATOR_STATE(state, path, bounce) == 0) {
+    if (kernel_data.film.use_deep_output && kernel_data.film.deep_peel == 0 &&
+        INTEGRATOR_STATE(state, path, bounce) == 0)
+    {
       ccl_global KernelDeepSample *deep_samples = (ccl_global KernelDeepSample *)
                                                       kernel_data.film.deep_samples_ptr;
       ccl_global uint32_t *deep_sample_counts = (ccl_global uint32_t *)
