@@ -233,6 +233,37 @@ void DeepRenderBuffers::merge_nearby_samples()
     }
 
     const size_t offset = pixel * max_samples_per_pixel_;
+    DeepSampleData *s = data + offset;
+
+    /* Path samples that carry their light (count > 0): group by depth and add up light, stops
+     * and counts, so the driver can turn each group into deep alpha and colour. Alpha differences
+     * don't keep samples apart here (glass and an opaque edge at one depth are one layer). */
+    if (s[0].count > 0.0f) {
+      uint32_t w = 0;
+      for (uint32_t r = 0; r < num_samples; r++) {
+        const DeepSampleData cur = s[r];
+        if (w > 0) {
+          DeepSampleData &prev = s[w - 1];
+          const bool prev_volume = prev.z_back > prev.z + deep_volume_depth_epsilon;
+          const bool cur_volume = cur.z_back > cur.z + deep_volume_depth_epsilon;
+          const bool close = prev_volume ? cur.z <= prev.z_back + depth_merge_threshold_ :
+                                           std::abs(cur.z - prev.z) < depth_merge_threshold_;
+          if (prev_volume == cur_volume && close) {
+            prev.r += cur.r;
+            prev.g += cur.g;
+            prev.b += cur.b;
+            prev.a = cur.a + prev.a * (1.0f - cur.a);
+            prev.stop += cur.stop;
+            prev.count += cur.count;
+            prev.z_back = prev_volume ? std::max(prev.z_back, cur.z_back) : prev.z;
+            continue;
+          }
+        }
+        s[w++] = cur;
+      }
+      counts[pixel] = w;
+      continue;
+    }
 
     counts[pixel] = blender::imbuf::deep_merge::merge_sorted_deep_samples(
         data + offset,

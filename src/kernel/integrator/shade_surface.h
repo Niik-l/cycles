@@ -233,6 +233,9 @@ integrate_direct_light_shadow_init_common(KernelGlobals kg,
 
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, render_pixel_index) = INTEGRATOR_STATE(
       state, path, render_pixel_index);
+  INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, deep_slot) = INTEGRATOR_STATE(state,
+                                                                                  path,
+                                                                                  deep_slot);
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, rng_offset) = INTEGRATOR_STATE(
       state, path, rng_offset);
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, rng_pixel) = INTEGRATOR_STATE(
@@ -528,6 +531,12 @@ ccl_device_forceinline int integrate_surface_bsdf_bssrdf_bounce(
   if (label & LABEL_TRANSPARENT) {
     /* Only need to modify start distance for transparent. */
     INTEGRATOR_STATE_WRITE(state, ray, tmin) = intersection_t_offset(sd->ray_length);
+#ifdef __DEEP_OUTPUT__
+    /* The camera path goes on through: its deep sample here doesn't end it. */
+    if (INTEGRATOR_STATE(state, path, bounce) == 0) {
+      film_deep_pass_through(kg, INTEGRATOR_STATE(state, path, deep_slot));
+    }
+#endif
   }
   else {
     /* Setup ray with changed origin and direction. */
@@ -683,6 +692,9 @@ ccl_device_forceinline void integrate_surface_ao(KernelGlobals kg,
 
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, render_pixel_index) = INTEGRATOR_STATE(
       state, path, render_pixel_index);
+  INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, deep_slot) = INTEGRATOR_STATE(state,
+                                                                                  path,
+                                                                                  deep_slot);
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, rng_offset) = INTEGRATOR_STATE(
       state, path, rng_offset);
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, rng_pixel) = INTEGRATOR_STATE(
@@ -770,7 +782,7 @@ ccl_device int integrate_surface(KernelGlobals kg,
             ccl_global uint32_t *deep_sample_counts = (ccl_global uint32_t *)
                                                           kernel_data.film.deep_sample_counts_ptr;
             if (deep_samples && deep_sample_counts) {
-              film_write_deep_sample_transparent(
+              INTEGRATOR_STATE_WRITE(state, path, deep_slot) = film_write_deep_sample_transparent(
                   kg, pixel_index, deep_samples, deep_sample_counts, alpha, depth, depth);
             }
           }

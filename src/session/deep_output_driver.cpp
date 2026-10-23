@@ -698,6 +698,49 @@ void DeepOutputDriver::populate_pixel_samples(size_t global_idx,
   float beauty_a = -1.0f;
   get_beauty_pixel(global_idx, beauty_r, beauty_g, beauty_b, beauty_a);
 
+  /* Samples carrying their own light (count > 0, kernel/film/deep_write.h). Sorted front to back,
+   * group i holds stop_i paths that ended there and the light L_i they gathered. With N paths
+   * through the pixel (sum of stops over the coverage, the beauty alpha), reach_i = N minus the
+   * stops in front, and
+   *   alpha_i = stop_i / reach_i,   colour_i = L_i / reach_i   (premultiplied, unoccluded)
+   * so flattening gives back the beauty: group i shows L_i / N. */
+  bool credited = count > 0;
+  double stops = 0.0, light = 0.0, paths = 0.0;
+  for (int s = 0; s < count && credited; s++) {
+    const DeepSampleData &src = sample_data[offset + s];
+    credited = src.count > 0.0f;
+    stops += src.stop;
+    light += fabsf(src.r) + fabsf(src.g) + fabsf(src.b);
+    paths += src.count;
+  }
+  if (credited) {
+    double N = stops;
+    if (use_beauty_buffer_ && beauty_a > deep_alpha_epsilon && beauty_a < 1.0f) {
+      N = stops / beauty_a;
+    }
+    if (N <= 0.0) {
+      N = paths;   // only pass-through samples (light without coverage)
+    }
+    double reached = 0.0;
+    for (int s = 0; s < count; s++) {
+      const DeepSampleData &src = sample_data[offset + s];
+      blender::DeepSample &dst = (*processed_cache_)[global_idx][s];
+      double reach = N - reached;
+      if (reach < 1e-6 * N) {
+        reach = std::max((double)src.stop, 1e-6 * N);
+      }
+      dst.a = (float)std::max(0.0, std::min(1.0, src.stop / reach));
+      dst.r = (float)(src.r / reach);
+      dst.g = (float)(src.g / reach);
+      dst.b = (float)(src.b / reach);
+      dst.z = src.z;
+      dst.z_back = src.z_back;
+      reached += src.stop;
+    }
+    (void)light;
+    return;
+  }
+
   vector<float> scaled_alphas;
   if (use_beauty_buffer_ && beauty_a >= 0.0f && count > 0) {
     compute_scaled_alphas(

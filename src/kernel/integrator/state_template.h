@@ -67,6 +67,8 @@ KERNEL_STRUCT_MEMBER(path, PackedSpectrum, denoising_feature_throughput, KERNEL_
 /* Shader sorting. */
 /* TODO: compress as uint16? or leave out entirely and recompute key in sorting code? */
 KERNEL_STRUCT_MEMBER(path, uint32_t, shader_sort_key, KERNEL_FEATURE_PATH_TRACING)
+/* Deep output: the deep sample this path's light goes to (kernel/film/deep_write.h). */
+KERNEL_STRUCT_MEMBER(path, uint32_t, deep_slot, KERNEL_FEATURE_PATH_TRACING)
 KERNEL_STRUCT_END(path)
 
 /************************************** Ray ***********************************/

@@ -1734,7 +1734,7 @@ ccl_device_forceinline void volume_integrate_homogeneous(KernelGlobals kg,
         alpha = saturatef(alpha);
 
         /* Write alpha-only sample (RGB=0), color applied via deep recolor. */
-        film_write_deep_sample_volume(
+        INTEGRATOR_STATE_WRITE(state, path, deep_slot) = film_write_deep_sample_volume(
             kg, pixel_index, deep_samples, deep_sample_counts, alpha, z_front, z_back);
       }
     }
@@ -1900,7 +1900,7 @@ ccl_device_forceinline void volume_integrate_heterogeneous(
         float z_front = camera_z_depth(kg, P_front);
         float z_back = camera_z_depth(kg, P_back);
 
-        film_write_deep_sample_volume(
+        INTEGRATOR_STATE_WRITE(state, path, deep_slot) = film_write_deep_sample_volume(
             kg, pixel_index, deep_samples, deep_sample_counts, segment_alpha, z_front, z_back);
       }
 
@@ -2464,7 +2464,7 @@ ccl_device_forceinline void volume_integrate_ray_marching(
             float z_back = camera_z_depth(kg, P_back);
 
             /* Write per-segment alpha (RGB=0), color applied via deep recolor. */
-            film_write_deep_sample_volume(
+            INTEGRATOR_STATE_WRITE(state, path, deep_slot) = film_write_deep_sample_volume(
                 kg, pixel_index, deep_samples, deep_sample_counts, segment_alpha, z_front, z_back);
           }
         }
@@ -2628,6 +2628,9 @@ ccl_device_forceinline void integrate_volume_direct_light(
 
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, render_pixel_index) = INTEGRATOR_STATE(
       state, path, render_pixel_index);
+  INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, deep_slot) = INTEGRATOR_STATE(state,
+                                                                                  path,
+                                                                                  deep_slot);
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, rng_offset) = INTEGRATOR_STATE(
       state, path, rng_offset);
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, rng_pixel) = INTEGRATOR_STATE(

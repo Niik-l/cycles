@@ -25,11 +25,15 @@ struct alignas(32) DeepSampleData {
   float z;
   /* Back depth (for volumetric samples, equals z for surfaces). */
   float z_back;
+  /* Paths that ended at this sample, and how many path samples it holds (kernel/film/deep_write.h:
+   * RGB is the light those paths gathered). */
+  float stop;
+  float count;
 
-  DeepSampleData() : r(0), g(0), b(0), a(0), z(0), z_back(0) {}
+  DeepSampleData() : r(0), g(0), b(0), a(0), z(0), z_back(0), stop(0), count(0) {}
 
   DeepSampleData(float r_, float g_, float b_, float a_, float z_, float z_back_)
-      : r(r_), g(g_), b(b_), a(a_), z(z_), z_back(z_back_)
+      : r(r_), g(g_), b(b_), a(a_), z(z_), z_back(z_back_), stop(0), count(0)
   {
   }
 

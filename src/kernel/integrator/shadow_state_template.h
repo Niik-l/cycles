@@ -59,6 +59,8 @@ KERNEL_STRUCT_MEMBER(shadow_path,
 KERNEL_STRUCT_MEMBER(shadow_path, uint64_t, path_segment, KERNEL_FEATURE_PATH_GUIDING)
 #endif
 KERNEL_STRUCT_MEMBER(shadow_path, float, guiding_mis_weight, KERNEL_FEATURE_PATH_GUIDING)
+/* Deep output: the deep sample of the path this shadow ray belongs to. */
+KERNEL_STRUCT_MEMBER(shadow_path, uint32_t, deep_slot, KERNEL_FEATURE_PATH_TRACING)
 KERNEL_STRUCT_END(shadow_path)
 
 /********************************** Shadow Ray *******************************/
