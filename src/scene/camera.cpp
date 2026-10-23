@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0 */
 
 #include <algorithm>
+#include <cmath>
 
 #include "scene/camera.h"
 #include "scene/mesh.h"
@@ -76,6 +77,13 @@ NODE_DEFINE(Camera)
   SOCKET_TRANSFORM_ARRAY(motion, "Motion", array<Transform>());
 
   SOCKET_FLOAT(aperture_ratio, "Aperture Ratio", 1.0f);
+
+  SOCKET_FLOAT_ARRAY(lens_surfaces, "Lens Surfaces", array<float>());
+  SOCKET_FLOAT(lens_focal_length, "Lens Focal Length", 50.0f);
+  SOCKET_FLOAT(lens_fstop, "Lens F-Stop", 2.8f);
+  SOCKET_FLOAT(lens_mm_per_unit, "Lens mm Per Unit", 1000.0f);
+  SOCKET_BOOLEAN(lens_chromatic, "Lens Chromatic", false);
+  SOCKET_FLOAT(lens_vignetting, "Lens Vignetting", 1.0f);
 
   static NodeEnum type_enum;
   type_enum.insert("perspective", CAMERA_PERSPECTIVE);
@@ -212,6 +220,325 @@ void Camera::compute_auto_viewplane()
       viewplane = BoundBox2D(make_float2(1.0f, 1.0f / aspect));
     }
   }
+}
+
+/* Real lens: the prescription laid out in lens space (mm, z from the front vertex towards the
+ * sensor), traced in double precision on the host. */
+namespace {
+
+struct LensLayout {
+  int n = 0;
+  int stop = -1;
+  double z[LENS_MAX_SURFACES];
+  double r[LENS_MAX_SURFACES];
+  double semi[LENS_MAX_SURFACES];
+  double ior[LENS_MAX_SURFACES][3]; /* the glass after the surface, R G B */
+  double stop_radius = 0.0;
+};
+
+/* Abbe number from the index along the line of ordinary glasses (for prescriptions without
+ * dispersion; the same estimate as LensDefocus). */
+double lens_abbe_for(const double n)
+{
+  return std::max(22.0, std::min(66.0, 64.0 - 135.0 * (n - 1.517)));
+}
+
+/* Index at a wavelength (nm) from n_d and the Abbe number (two-term Cauchy). */
+double lens_index_at(const double nd, const double abbe, const double nm)
+{
+  if (nd <= 1.0001 || abbe <= 0.0) {
+    return nd <= 0.0 ? 1.0 : nd;
+  }
+  const double ld = 0.5876, lF = 0.4861, lC = 0.6563, l = nm * 1e-3;
+  const double B = ((nd - 1.0) / abbe) / (1.0 / (lF * lF) - 1.0 / (lC * lC));
+  return nd + B * (1.0 / (l * l) - 1.0 / (ld * ld));
+}
+
+/* Traces through surfaces from..to (towards the sensor when to > from, out of the front when
+ * to < from) for channel ch. Apertures (rims, the iris as a disc) are enforced when clip. */
+bool lens_trace_host(const LensLayout &L,
+                     const int from,
+                     const int to,
+                     const int ch,
+                     const bool clip,
+                     double o[3],
+                     double d[3])
+{
+  const int step = to >= from ? 1 : -1;
+  for (int i = from;; i += step) {
+    double t, N[3] = {0.0, 0.0, 1.0};
+    if (L.r[i] == 0.0) {
+      if (std::fabs(d[2]) < 1e-15) {
+        return false;
+      }
+      t = (L.z[i] - o[2]) / d[2];
+    }
+    else {
+      const double c = L.z[i] + L.r[i];
+      const double oc[3] = {o[0], o[1], o[2] - c};
+      const double B = oc[0] * d[0] + oc[1] * d[1] + oc[2] * d[2];
+      const double C = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - L.r[i] * L.r[i];
+      const double disc = B * B - C;
+      if (disc < 0.0) {
+        return false;
+      }
+      const double sq = std::sqrt(disc);
+      const bool closer = (d[2] > 0.0) != (L.r[i] < 0.0);
+      t = closer ? -B - sq : -B + sq;
+      const double h[3] = {o[0] + t * d[0], o[1] + t * d[1], o[2] + t * d[2]};
+      N[0] = h[0] / L.r[i];
+      N[1] = h[1] / L.r[i];
+      N[2] = (h[2] - c) / L.r[i];
+    }
+    if (t < -1e-9) {
+      return false;
+    }
+    for (int k = 0; k < 3; k++) {
+      o[k] += t * d[k];
+    }
+    const double h2 = o[0] * o[0] + o[1] * o[1];
+    if (i == L.stop) {
+      if (clip && h2 > L.stop_radius * L.stop_radius) {
+        return false;
+      }
+    }
+    else {
+      if (clip && h2 > L.semi[i] * L.semi[i]) {
+        return false;
+      }
+      /* forward: from the medium before into the glass after; back out: the reverse */
+      const double before = i > 0 ? L.ior[i - 1][ch] : 1.0;
+      const double after = L.ior[i][ch];
+      const double n1 = step > 0 ? before : after, n2 = step > 0 ? after : before;
+      if (n1 != n2) {
+        double cosi = -(N[0] * d[0] + N[1] * d[1] + N[2] * d[2]);
+        if (cosi < 0.0) {
+          for (int k = 0; k < 3; k++) {
+            N[k] = -N[k];
+          }
+          cosi = -cosi;
+        }
+        const double eta = n1 / n2;
+        const double kk = 1.0 - eta * eta * (1.0 - cosi * cosi);
+        if (kk < 0.0) {
+          return false;
+        }
+        const double a = eta * cosi - std::sqrt(kk);
+        double len = 0.0;
+        for (int k = 0; k < 3; k++) {
+          d[k] = eta * d[k] + a * N[k];
+          len += d[k] * d[k];
+        }
+        len = std::sqrt(len);
+        for (int k = 0; k < 3; k++) {
+          d[k] /= len;
+        }
+      }
+    }
+    if (i == to) {
+      return true;
+    }
+  }
+}
+
+}  // namespace
+
+void Camera::update_lens(KernelCamera *kcam)
+{
+  kcam->lens_num_surfaces = 0;
+  lens_message.clear();
+  lens_effective_fstop = 0.0f;
+  if (lens_surfaces.empty() || camera_type != CAMERA_PERSPECTIVE) {
+    return;
+  }
+  const int n = (int)(lens_surfaces.size() / 5);
+  if (n < 2 || n > LENS_MAX_SURFACES || lens_surfaces.size() % 5 != 0) {
+    lens_message = "lens: 2 to 32 surfaces of 5 values each";
+    return;
+  }
+
+  /* Paraxial focal length of the design as given (y-u trace, flat surfaces bend too). */
+  LensLayout L;
+  L.n = n;
+  double y = 1.0, u = 0.0, nPrev = 1.0;
+  for (int i = 0; i < n; i++) {
+    const float *row = &lens_surfaces[i * 5];
+    const bool isStop = row[0] == 0.0f && row[2] <= 0.0f;
+    if (isStop) {
+      if (L.stop >= 0) {
+        lens_message = "lens: more than one aperture stop";
+        return;
+      }
+      L.stop = i;
+    }
+    const double nd = row[2] <= 0.0f ? 1.0 : row[2];
+    u = (nPrev * u - (row[0] != 0.0f ? y * (nd - nPrev) / row[0] : 0.0)) / nd;
+    nPrev = nd;
+    y += row[1] * u;
+  }
+  if (L.stop < 0) {
+    lens_message = "lens: no aperture stop (a row with radius 0 and index 0)";
+    return;
+  }
+  if (u >= 0.0) {
+    lens_message = "lens: the prescription doesn't focus (negative or no power)";
+    return;
+  }
+  const double focal = std::max(1e-3f, lens_focal_length);
+  const double k = focal / (-1.0 / u);
+
+  /* Layout, scaled to the focal length. */
+  double zc = 0.0;
+  for (int i = 0; i < n; i++) {
+    const float *row = &lens_surfaces[i * 5];
+    const double nd = row[2] <= 0.0f ? 1.0 : row[2];
+    const double abbe = row[4] > 0.0f ? row[4] : lens_abbe_for(nd);
+    L.z[i] = zc;
+    L.r[i] = i == L.stop ? 0.0 : row[0] * k;
+    L.semi[i] = 0.5 * row[3] * k;
+    L.ior[i][0] = lens_index_at(nd, abbe, 610.0);
+    L.ior[i][1] = lens_index_at(nd, abbe, 550.0);
+    L.ior[i][2] = lens_index_at(nd, abbe, 465.0);
+    zc += row[1] * k;
+  }
+
+  /* Iris: the entrance pupil radius f / 2N maps to the stop through the front group (paraxial
+   * height at the stop of a ray parallel at height 1); no wider than the stop's clear radius. */
+  double ys = 1.0;
+  {
+    double yy = 1.0, uu = 0.0, np = 1.0;
+    for (int i = 0; i < L.stop; i++) {
+      const double nd = L.ior[i][1];
+      uu = (np * uu - (L.r[i] != 0.0 ? yy * (nd - np) / L.r[i] : 0.0)) / nd;
+      np = nd;
+      yy += (L.z[i + 1] - L.z[i]) * uu;
+    }
+    ys = std::fabs(yy) > 1e-9 ? std::fabs(yy) : 1.0;
+  }
+  const double epWanted = focal / (2.0 * std::max(0.1f, lens_fstop));
+  L.stop_radius = std::min(L.semi[L.stop], epWanted * ys);
+  const double epRadius = L.stop_radius / ys;
+  lens_effective_fstop = (float)(focal / (2.0 * epRadius));
+
+  /* Entrance pupil: the image of the stop centre through the front group. */
+  double zEP = L.z[L.stop];
+  if (L.stop > 0) {
+    const double a = 1e-3;
+    double o[3] = {0.0, 0.0, L.z[L.stop]}, d[3] = {std::sin(a), 0.0, -std::cos(a)};
+    if (lens_trace_host(L, L.stop - 1, 0, 1, false, o, d) && std::fabs(d[0]) > 1e-15) {
+      zEP = o[2] - o[0] * d[2] / d[0];
+    }
+  }
+
+  /* Sensor distance: where a point on the axis at the focus distance (from the entrance pupil)
+   * comes to focus, from a near-axis ray (green). */
+  const double mmPerUnit = std::max(1e-9f, lens_mm_per_unit);
+  const double focusMm = std::max(1e-3, (double)focaldistance * mmPerUnit);
+  double sensorZ;
+  {
+    const double h = 0.05 * epRadius;
+    const double zObj = zEP - focusMm;
+    double o[3] = {0.0, 0.0, zObj}, d[3] = {h, 0.0, zEP - zObj};
+    const double len = std::sqrt(d[0] * d[0] + d[2] * d[2]);
+    d[0] /= len;
+    d[2] /= len;
+    if (!lens_trace_host(L, 0, n - 1, 1, false, o, d) || std::fabs(d[0]) < 1e-15 ||
+        d[2] <= 0.0) {
+      lens_message = "lens: can't focus at this distance";
+      return;
+    }
+    sensorZ = o[2] - o[0] * d[2] / d[0];
+    if (!(sensorZ > L.z[n - 1])) {
+      lens_message = "lens: the focus lands inside the lens (too close)";
+      return;
+    }
+  }
+
+  /* Sensor radius at the frame corners (mm), through the pinhole mapping the kernel uses. */
+  double rhoMax = 0.0;
+  {
+    const float corners[4][2] = {
+        {0.0f, 0.0f}, {(float)full_width, 0.0f}, {0.0f, (float)full_height}, {(float)full_width, (float)full_height}};
+    for (int c = 0; c < 4; c++) {
+      const float3 v = transform_perspective(&full_rastertocamera,
+                                             make_float3(corners[c][0], corners[c][1], 0.0f));
+      if (v.z != 0.0f) {
+        rhoMax = std::max(rhoMax, focal * std::sqrt((double)v.x * v.x + (double)v.y * v.y) / std::fabs(v.z));
+      }
+    }
+    rhoMax = std::max(1e-3, rhoMax * 1.02);
+  }
+
+  /* Exit pupil bounds: for sensor points along +x, the box on the rear element's plane that the
+   * rays reaching the scene go through, and the light (cos^4 over distance squared, integrated
+   * over the rays that pass). */
+  const int last = n - 1;
+  const double rear = L.semi[last];
+  const double dz = sensorZ - L.z[last];
+  const int G = 64;
+  const double cell = 2.0 * rear / G;
+  double lightRef = 0.0;
+  for (int b = 0; b < LENS_PUPIL_BINS; b++) {
+    const double rs = rhoMax * b / (LENS_PUPIL_BINS - 1);
+    double x0 = 1e30, x1 = -1e30, yh = 0.0, light = 0.0;
+    for (int gy = 0; gy < G; gy++) {
+      for (int gx = 0; gx < G; gx++) {
+        const double px = -rear + (gx + 0.5) * cell, py = -rear + (gy + 0.5) * cell;
+        if (px * px + py * py > rear * rear) {
+          continue;
+        }
+        double o[3] = {rs, 0.0, sensorZ}, d[3] = {px - rs, py, -dz};
+        const double len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        for (int q = 0; q < 3; q++) {
+          d[q] /= len;
+        }
+        const double cosT = -d[2];
+        if (!lens_trace_host(L, last, 0, 1, true, o, d)) {
+          continue;
+        }
+        x0 = std::min(x0, px);
+        x1 = std::max(x1, px);
+        yh = std::max(yh, std::fabs(py));
+        light += cosT * cosT * cosT * cosT / (dz * dz) * cell * cell;
+      }
+    }
+    float4 &p = kcam->lens_pupil[b];
+    if (x1 < x0) {
+      p = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+    else {
+      p = make_float4((float)std::max(-rear, x0 - cell),
+                      (float)std::min(rear, x1 + cell),
+                      (float)std::min(rear, yh + cell),
+                      (float)light);
+    }
+    if (b == 0) {
+      lightRef = light;
+    }
+  }
+  if (!(lightRef > 0.0)) {
+    lens_message = "lens: no light gets through on the axis";
+    return;
+  }
+
+  for (int i = 0; i < n; i++) {
+    kcam->lens_surface[i] = make_float4(
+        (float)L.z[i], (float)L.r[i], (float)L.semi[i], i == L.stop ? 1.0f : 0.0f);
+    kcam->lens_ior[i] = make_float4(
+        (float)L.ior[i][0], (float)L.ior[i][1], (float)L.ior[i][2], 0.0f);
+  }
+  kcam->lens_chromatic = lens_chromatic ? 1 : 0;
+  kcam->lens_blades = blades < 3 ? 0 : (int)blades;
+  kcam->lens_blades_rotation = bladesrotation;
+  kcam->lens_focal_length = (float)focal;
+  kcam->lens_stop_radius = (float)L.stop_radius;
+  kcam->lens_sensor_z = (float)sensorZ;
+  kcam->lens_entrance_pupil_z = (float)zEP;
+  kcam->lens_mm_to_scene = (float)(1.0 / mmPerUnit);
+  kcam->lens_pupil_rho_max = (float)rhoMax;
+  kcam->lens_light_ref = (float)lightRef;
+  kcam->lens_vignetting = clamp(lens_vignetting, 0.0f, 1.0f);
+  kcam->lens_num_surfaces = n;
 }
 
 void Camera::update(Scene *scene)
@@ -421,6 +748,9 @@ void Camera::update(Scene *scene)
   kcam->focaldistance = max(focaldistance, 1e-5f);
   kcam->blades = (blades < 3) ? 0.0f : blades;
   kcam->bladesrotation = bladesrotation;
+
+  /* real lens */
+  update_lens(kcam);
 
   /* motion blur */
   kcam->shuttertime = (need_motion == Scene::MOTION_BLUR) ? shuttertime : -1.0f;

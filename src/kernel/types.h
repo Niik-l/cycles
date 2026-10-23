@@ -1280,6 +1280,9 @@ struct LocalIntersection {
  * must match exactly. Structs are padded to ensure 16 byte alignment, and we
  * do not use float3 because its size may not be the same on all devices. */
 
+#define LENS_MAX_SURFACES 32
+#define LENS_PUPIL_BINS 64
+
 struct KernelCamera {
   /* type */
   int type;
@@ -1363,6 +1366,28 @@ struct KernelCamera {
   float rolling_shutter_duration;
 
   int motion_position;
+
+  /* Real lens (kernel/camera/lens.h; set up in Camera::update). lens_num_surfaces = 0: off. Lens
+   * space is millimetres, z from the front vertex towards the sensor. */
+  int lens_num_surfaces;
+  int lens_chromatic;
+  int lens_blades;
+  float lens_blades_rotation;
+  float lens_focal_length;
+  float lens_stop_radius;
+  float lens_sensor_z;
+  float lens_entrance_pupil_z;
+  float lens_mm_to_scene;
+  float lens_pupil_rho_max;
+  float lens_light_ref;
+  float lens_vignetting;
+  /* vertex z, radius (0 = flat), clear semi-diameter, 1 = the aperture stop */
+  float4 lens_surface[LENS_MAX_SURFACES];
+  /* index of the glass after the surface for R, G, B */
+  float4 lens_ior[LENS_MAX_SURFACES];
+  /* per sensor radius 0..lens_pupil_rho_max: rear-plane box radial x0, x1, tangential half
+   * height, light reaching that radius */
+  float4 lens_pupil[LENS_PUPIL_BINS];
 };
 static_assert_align(KernelCamera, 16);
 

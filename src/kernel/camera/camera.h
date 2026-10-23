@@ -6,6 +6,7 @@
 
 #include "kernel/globals.h"
 
+#include "kernel/camera/lens.h"
 #include "kernel/camera/projection.h"
 #include "kernel/sample/mapping.h"
 #include "kernel/util/differential.h"
@@ -45,6 +46,10 @@ ccl_device Spectrum camera_sample_perspective(KernelGlobals kg,
                                               const float2 rand_lens,
                                               ccl_private Ray *ray)
 {
+  if (kernel_data.cam.lens_num_surfaces > 0) {
+    return camera_sample_lens(kg, raster_xy, rand_lens, ray);
+  }
+
   /* create ray form raster position */
   const ProjectionTransform rastertocamera = kernel_data.cam.rastertocamera;
   const float3 raster = make_float3(raster_xy);

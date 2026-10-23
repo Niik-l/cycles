@@ -277,6 +277,7 @@ set(SRC_KERNEL_BVH_HEADERS
 
 set(SRC_KERNEL_CAMERA_HEADERS
   camera/camera.h
+  camera/lens.h
   camera/projection.h
 )
 

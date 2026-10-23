@@ -113,6 +113,19 @@ class Camera : public Node {
   /* anamorphic lens bokeh */
   NODE_SOCKET_API(float, aperture_ratio)
 
+  /* Real lens (perspective camera; kernel/camera/lens.h). A prescription, 5 values per surface
+   * from the front: radius, thickness, n_d, clear diameter (mm), Abbe number (0 = estimated from
+   * n_d); radius 0 with n_d 0 is the aperture stop, radius 0 with glass a flat surface. Scaled to
+   * lens_focal_length; focused at focaldistance from the entrance pupil; the iris set by
+   * lens_fstop (clamped to the widest the design allows) and blades / bladesrotation. Empty: the
+   * ordinary pinhole / thin-lens camera. */
+  NODE_SOCKET_API_ARRAY(array<float>, lens_surfaces)
+  NODE_SOCKET_API(float, lens_focal_length)
+  NODE_SOCKET_API(float, lens_fstop)
+  NODE_SOCKET_API(float, lens_mm_per_unit)
+  NODE_SOCKET_API(bool, lens_chromatic)
+  NODE_SOCKET_API(float, lens_vignetting)
+
   /* sensor */
   NODE_SOCKET_API(float, sensorwidth)
   NODE_SOCKET_API(float, sensorheight)
@@ -191,6 +204,10 @@ class Camera : public Node {
   KernelCamera kernel_camera;
   array<DecomposedTransform> kernel_camera_motion;
 
+  /* Real lens: why it is off (empty when on or not asked for), and the f-number traced. */
+  std::string lens_message;
+  float lens_effective_fstop = 0.0f;
+
   /* Custom camera script. */
   std::string script_name;
   map<ustring, pair<vector<uint8_t>, TypeDesc>> script_params;
@@ -237,6 +254,8 @@ class Camera : public Node {
  private:
   /* Private utility functions. */
   float3 transform_full_raster_to_world(const float raster_x, const float raster_y);
+  /* Lays out the real lens into kcam (lens_num_surfaces = 0 when off or failing). */
+  void update_lens(KernelCamera *kcam);
 };
 
 CCL_NAMESPACE_END

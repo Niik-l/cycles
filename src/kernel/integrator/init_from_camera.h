@@ -29,7 +29,7 @@ ccl_device_inline Spectrum integrate_camera_sample(KernelGlobals kg,
 
   /* Motion blur (time) and depth of field (lens) sampling. (time, lens_x, lens_y) */
   const bool use_motionblur = kernel_data.cam.shuttertime != -1.0f;
-  const bool use_dof = kernel_data.cam.aperturesize > 0.0f;
+  const bool use_dof = kernel_data.cam.aperturesize > 0.0f || kernel_data.cam.lens_num_surfaces > 0;
   const bool use_custom_cam = kernel_data.cam.type == CAMERA_CUSTOM;
   const float3 rand_time_lens = (use_motionblur || use_dof || use_custom_cam) ?
                                     path_rng_3D(kg, rng_pixel, sample, PRNG_LENS_TIME) :
