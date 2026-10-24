@@ -84,7 +84,7 @@ unique_ptr<Device> device_cuda_create(const DeviceInfo &info,
 #ifdef WITH_CUDA
 static CUresult device_cuda_safe_init()
 {
-#  ifdef _WIN32
+#  if defined(_WIN32) && defined(_MSC_VER) /* SEH is MSVC-only; MinGW calls cuInit directly */
   __try
   {
     return cuInit(0);
