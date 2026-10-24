@@ -7,6 +7,10 @@
 #include "kernel/film/write.h"
 #include "util/atomic.h"
 
+#ifndef __KERNEL_GPU__
+#  include <atomic>
+#endif
+
 CCL_NAMESPACE_BEGIN
 
 /* -------------------------------------------------------------------- */
@@ -40,9 +44,42 @@ struct ccl_align(32) KernelDeepSample {
   float count;
 };
 
+/* Makes a newly claimed sample's fields visible before its depth, which publishes it to the other
+ * paths of the pixel (they skip slots whose depth is still 0). */
+#  if defined(__KERNEL_CUDA__) || defined(__KERNEL_HIP__)
+#    define deep_publish_fence() __threadfence()
+#  elif !defined(__KERNEL_GPU__)
+#    define deep_publish_fence() std::atomic_thread_fence(std::memory_order_release)
+#  else
+#    define deep_publish_fence() ((void)0)
+#  endif
+
+/* Same depth for the merge: surfaces within the merge threshold, volume segments that touch. */
+ccl_device_inline bool deep_same_depth(const float z,
+                                       const float z_back,
+                                       const bool volume,
+                                       const float sz,
+                                       const float sz_back,
+                                       const float threshold)
+{
+  const bool svolume = sz_back > sz + 1e-6f;
+  if (volume != svolume) {
+    return false;
+  }
+  return volume ? (z <= sz_back + threshold && z_back >= sz - threshold) :
+                  fabsf(z - sz) < threshold;
+}
+
 /**
- * Append a deep sample for the current pixel and return its slot (DEEP_SLOT_NONE when the
- * pixel's samples are full).
+ * Add a camera path's hit to the pixel's deep samples and return the slot it went to
+ * (DEEP_SLOT_NONE only when there is no buffer).
+ *
+ * Paths at the same depth (deep_merge_threshold) share one sample: its light, stops and path count
+ * add up as they are traced, so a pixel needs a slot per surface (or volume segment) it sees, not
+ * per path sample. A new depth claims a slot; when the pixel's slots are full the path joins the
+ * nearest depth instead of being lost. Slots are zeroed before the render (DeepRenderBuffers),
+ * every field but the depths is accumulated atomically, and a claimed slot is published by writing
+ * its front depth last (> 0: depths start at the near clip).
  *
  * \param alpha: Shader / segment opacity (kept for the alpha-only output).
  * \param stop: Paths ending here: 1 for surfaces, the opacity for volume segments.
@@ -61,37 +98,68 @@ ccl_device_inline uint32_t film_write_deep_sample_transparent(
 {
   /* Bounds check: ensure pixel index is within allocated buffer. */
   const uint32_t num_pixels = kernel_data.film.deep_width * kernel_data.film.deep_height;
-  if (pixel_index >= num_pixels) {
+  const uint32_t max_samples = kernel_data.film.deep_max_samples;
+  if (pixel_index >= num_pixels || max_samples == 0 || !(z > 0.0f)) {
+    return DEEP_SLOT_NONE;
+  }
+  const uint64_t base = (uint64_t)pixel_index * max_samples;
+  if (base + max_samples > (uint64_t)DEEP_SLOT_NONE) {
     return DEEP_SLOT_NONE;
   }
 
-  /* Atomically increment sample count and get our slot index. */
-  const uint32_t sample_idx = atomic_fetch_and_add_uint32(&sample_counts[pixel_index], 1);
+  const bool volume = z_back > z + 1e-6f;
+  const float threshold = kernel_data.film.deep_merge_threshold;
+  uint32_t slot = DEEP_SLOT_NONE;
 
-  /* Check against maximum samples per pixel. */
-  if (sample_idx >= kernel_data.film.deep_max_samples) {
-    /* Decrement count since we couldn't store the sample. */
-    atomic_fetch_and_add_uint32(&sample_counts[pixel_index], -1);
-    return DEEP_SLOT_NONE;
+  /* A sample at this depth already? */
+  const uint32_t n = min(sample_counts[pixel_index], max_samples);
+  for (uint32_t i = 0; i < n; i++) {
+    const ccl_global KernelDeepSample *s = &deep_samples[base + i];
+    const float sz = s->z;
+    if (sz > 0.0f && deep_same_depth(z, z_back, volume, sz, s->z_back, threshold)) {
+      slot = (uint32_t)(base + i);
+      break;
+    }
   }
 
-  /* Calculate offset into sample data buffer
-   * Layout: pixel[0].samples[0..max], pixel[1].samples[0..max], ... */
-  const uint64_t offset = (uint64_t)pixel_index * kernel_data.film.deep_max_samples + sample_idx;
-  if (offset >= (uint64_t)DEEP_SLOT_NONE) {
-    return DEEP_SLOT_NONE;
+  if (slot == DEEP_SLOT_NONE) {
+    const uint32_t idx = atomic_fetch_and_add_uint32(&sample_counts[pixel_index], 1);
+    if (idx < max_samples) {
+      /* A new depth (another path of the pixel may claim the same one at the same time: the
+       * output driver merges such pairs). */
+      slot = (uint32_t)(base + idx);
+      deep_samples[slot].z_back = z_back;
+      deep_samples[slot].a = alpha;
+      deep_publish_fence();
+      deep_samples[slot].z = z;
+    }
+    else {
+      /* Full: join the nearest published depth (volumes prefer volumes). */
+      atomic_fetch_and_add_uint32(&sample_counts[pixel_index], (uint32_t)-1);
+      float best = FLT_MAX;
+      for (uint32_t i = 0; i < max_samples; i++) {
+        const ccl_global KernelDeepSample *s = &deep_samples[base + i];
+        const float sz = s->z;
+        if (!(sz > 0.0f)) {
+          continue;
+        }
+        const bool svolume = s->z_back > sz + 1e-6f;
+        const float d = fabsf(sz - z) + (svolume != volume ? 1e30f : 0.0f);
+        if (d < best) {
+          best = d;
+          slot = (uint32_t)(base + i);
+        }
+      }
+      if (slot == DEEP_SLOT_NONE) {
+        return DEEP_SLOT_NONE;
+      }
+    }
   }
 
   /* RGB gathers the path's light as it is traced (film_deep_add_light). */
-  deep_samples[offset].r = 0.0f;
-  deep_samples[offset].g = 0.0f;
-  deep_samples[offset].b = 0.0f;
-  deep_samples[offset].a = alpha;
-  deep_samples[offset].z = z;
-  deep_samples[offset].z_back = z_back;
-  deep_samples[offset].stop = stop;
-  deep_samples[offset].count = 1.0f;
-  return (uint32_t)offset;
+  atomic_add_and_fetch_float(&deep_samples[slot].stop, stop);
+  atomic_add_and_fetch_float(&deep_samples[slot].count, 1.0f);
+  return slot;
 }
 
 /**
@@ -157,7 +225,9 @@ ccl_device_inline void film_deep_pass_through(KernelGlobals kg, const uint32_t s
   ccl_global KernelDeepSample *deep_samples = (ccl_global KernelDeepSample *)
                                                   kernel_data.film.deep_samples_ptr;
   if (deep_samples) {
-    deep_samples[slot].stop = 0.0f;
+    /* Take back this path's stop (1: pass-through happens on surfaces); other paths may share the
+     * sample. */
+    atomic_add_and_fetch_float(&deep_samples[slot].stop, -1.0f);
   }
 }
 

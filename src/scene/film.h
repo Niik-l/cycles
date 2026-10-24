@@ -57,6 +57,8 @@ class Film : public Node {
   NODE_SOCKET_API(int, deep_max_samples)
   /* Deep hidden layers: camera rays pass through their first deep_peel objects (0 = off). */
   NODE_SOCKET_API(int, deep_peel)
+  /* Depth within which camera paths share a deep sample in the kernel (scene units). */
+  NODE_SOCKET_API(float, deep_merge_threshold)
 
   void set_deep_samples_ptr(uint64_t ptr)
   {

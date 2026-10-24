@@ -127,6 +127,7 @@ NODE_DEFINE(Film)
   SOCKET_BOOLEAN(use_deep_output, "Use Deep Output", false);
   SOCKET_INT(deep_max_samples, "Deep Max Samples", 64);
   SOCKET_INT(deep_peel, "Deep Peel", 0);
+  SOCKET_FLOAT(deep_merge_threshold, "Deep Merge Threshold", 0.001f);
 
   return type;
 }
@@ -452,6 +453,7 @@ void Film::device_update(Device *device, DeviceScene *dscene, Scene *scene)
   kfilm->use_deep_output = use_deep_output;
   kfilm->deep_max_samples = deep_max_samples;
   kfilm->deep_peel = use_deep_output ? deep_peel : 0;
+  kfilm->deep_merge_threshold = max(deep_merge_threshold, 0.0f);
   kfilm->deep_width = deep_width_;
   kfilm->deep_height = deep_height_;
   kfilm->deep_samples_ptr = deep_samples_ptr_;
